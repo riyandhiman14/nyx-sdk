@@ -22,6 +22,8 @@ from typing import Any
 
 PROFILES: dict[str, dict[str, Any]] = {
     "chrome131_win": {
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "platform": "Win32",
         "vendor": "Google Inc.",
         "hardware_concurrency": 8,
         "device_memory": 8,
@@ -46,6 +48,8 @@ PROFILES: dict[str, dict[str, Any]] = {
         "ua_full_version": "131.0.6778.109",
     },
     "chrome132_mac": {
+        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
+        "platform": "MacIntel",
         "vendor": "Google Inc.",
         "hardware_concurrency": 10,
         "device_memory": 8,
@@ -70,6 +74,8 @@ PROFILES: dict[str, dict[str, Any]] = {
         "ua_full_version": "132.0.6834.83",
     },
     "chrome130_linux": {
+        "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        "platform": "Linux x86_64",
         "vendor": "Google Inc.",
         "hardware_concurrency": 4,
         "device_memory": 8,
@@ -94,6 +100,8 @@ PROFILES: dict[str, dict[str, Any]] = {
         "ua_full_version": "130.0.6723.91",
     },
     "chrome131_win_nvidia": {
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "platform": "Win32",
         "vendor": "Google Inc.",
         "hardware_concurrency": 16,
         "device_memory": 8,
@@ -118,6 +126,8 @@ PROFILES: dict[str, dict[str, Any]] = {
         "ua_full_version": "131.0.6778.140",
     },
     "chrome132_win_amd": {
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
+        "platform": "Win32",
         "vendor": "Google Inc.",
         "hardware_concurrency": 12,
         "device_memory": 8,

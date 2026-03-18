@@ -87,8 +87,12 @@ class BrowserProcess:
             fp = resolve_fingerprint(profile)
         if fp is not None:
             import json as _json
-            fp_str = fp if isinstance(fp, str) else _json.dumps(fp)
-            args.extend(["--fingerprint", fp_str])
+            fp_dict = _json.loads(fp) if isinstance(fp, str) else fp
+            # user_agent must be set via CEF --user-agent flag (can't override via JS)
+            ua = fp_dict.pop("user_agent", None)
+            if ua:
+                args.extend(["--user-agent", ua])
+            args.extend(["--fingerprint", _json.dumps(fp_dict)])
 
         if extra_args:
             args.extend(extra_args)
