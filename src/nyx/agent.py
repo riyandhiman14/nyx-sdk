@@ -57,14 +57,16 @@ class AgentBrowser:
 
     @classmethod
     async def launch(cls, *, headless: bool = True, proxy: str | None = None,
+                     profile: str | None = None,
                      fingerprint: dict | str | None = None,
                      timeout: float = 30, version: str | None = None,
                      auto_install: bool = True,
                      extra_args: list[str] | None = None) -> AgentBrowser:
         """Launch a new browser and return an AgentBrowser connected to it."""
         process = await BrowserProcess.start(
-            headless=headless, proxy=proxy, fingerprint=fingerprint,
-            version=version, auto_install=auto_install, extra_args=extra_args,
+            headless=headless, proxy=proxy, profile=profile,
+            fingerprint=fingerprint, version=version,
+            auto_install=auto_install, extra_args=extra_args,
         )
         transport = Transport(
             f"http://127.0.0.1:{process.port}", timeout=timeout

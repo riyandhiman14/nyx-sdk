@@ -41,6 +41,7 @@ class BrowserProcess:
         headless: bool = True,
         port: int | None = None,
         proxy: str | None = None,
+        profile: str | None = None,
         fingerprint: dict | str | None = None,
         version: str | None = None,
         auto_install: bool = True,
@@ -52,7 +53,8 @@ class BrowserProcess:
             headless: Run without GUI (default True).
             port: AgentServer port (auto-picked if None).
             proxy: Proxy URL (http://, socks5://, etc.).
-            fingerprint: Browser fingerprint profile (dict or JSON string).
+            profile: Fingerprint profile name ("chrome131", "random", "windows").
+            fingerprint: Raw fingerprint dict/JSON (overrides profile).
             version: Browser version to use (defaults to SDK version).
             auto_install: Auto-download browser if not found (default True).
             extra_args: Additional CLI args to pass to the browser.
@@ -77,10 +79,17 @@ class BrowserProcess:
             args.append("--headless")
         if proxy:
             args.extend(["--proxy", proxy])
-        if fingerprint:
+
+        # Resolve fingerprint: explicit dict/JSON > profile name > None
+        fp = fingerprint
+        if fp is None and profile is not None:
+            from nyx._fingerprints import resolve_fingerprint
+            fp = resolve_fingerprint(profile)
+        if fp is not None:
             import json as _json
-            fp_str = fingerprint if isinstance(fingerprint, str) else _json.dumps(fingerprint)
+            fp_str = fp if isinstance(fp, str) else _json.dumps(fp)
             args.extend(["--fingerprint", fp_str])
+
         if extra_args:
             args.extend(extra_args)
 

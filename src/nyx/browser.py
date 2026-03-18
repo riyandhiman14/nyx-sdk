@@ -45,6 +45,7 @@ class Browser:
         *,
         headless: bool = True,
         proxy: str | None = None,
+        profile: str | None = None,
         fingerprint: dict | str | None = None,
         timeout: float = 30,
         version: str | None = None,
@@ -56,7 +57,8 @@ class Browser:
         Args:
             headless: Run without GUI (default True).
             proxy: Proxy URL (e.g. http://user:pass@host:port or socks5://...).
-            fingerprint: Browser fingerprint profile (dict or JSON string).
+            profile: Fingerprint profile ("chrome131", "random", "windows", "macos", "linux").
+            fingerprint: Raw fingerprint dict/JSON (overrides profile).
             timeout: Max seconds to wait for browser readiness.
             version: Browser version to use (defaults to SDK version).
             auto_install: Auto-download browser if not found (default True).
@@ -65,6 +67,7 @@ class Browser:
         process = await BrowserProcess.start(
             headless=headless,
             proxy=proxy,
+            profile=profile,
             fingerprint=fingerprint,
             version=version,
             auto_install=auto_install,
