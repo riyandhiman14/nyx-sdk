@@ -1,0 +1,2 @@
+[console_scripts]
+nyx = nyx._cli:main
