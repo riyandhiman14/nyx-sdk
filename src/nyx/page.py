@@ -23,15 +23,26 @@ class ElementHandle:
         self.text: str = data.get("text", "")
         self.attributes: dict[str, str] = data.get("attributes", {})
 
+    def _qs(self) -> str:
+        """JS expression that resolves to this element."""
+        return f"document.querySelector({self._page._js_str(self._data.get('selector', ''))})"
+
     async def click(self) -> None:
-        await self._page.evaluate(
-            f"document.querySelector({self._page._js_str(self._data.get('selector', ''))}).click()"
-        )
+        await self._page.evaluate(f"{self._qs()}.click()")
 
     async def inner_text(self) -> str:
+        return await self._page.evaluate(f"{self._qs()}?.innerText || ''")
+
+    async def text_content(self) -> str | None:
+        return await self._page.evaluate(f"{self._qs()}?.textContent")
+
+    async def get_attribute(self, name: str) -> str | None:
         return await self._page.evaluate(
-            f"document.querySelector({self._page._js_str(self._data.get('selector', ''))})?.innerText || ''"
+            f"{self._qs()}?.getAttribute({self._page._js_str(name)})"
         )
+
+    async def input_value(self) -> str:
+        return await self._page.evaluate(f"{self._qs()}?.value || ''")
 
     def __repr__(self) -> str:
         return f"ElementHandle(tag={self.tag!r}, text={self.text!r})"

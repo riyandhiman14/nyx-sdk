@@ -41,6 +41,7 @@ class BrowserProcess:
         headless: bool = True,
         port: int | None = None,
         proxy: str | None = None,
+        fingerprint: dict | str | None = None,
         version: str | None = None,
         auto_install: bool = True,
         extra_args: list[str] | None = None,
@@ -51,6 +52,7 @@ class BrowserProcess:
             headless: Run without GUI (default True).
             port: AgentServer port (auto-picked if None).
             proxy: Proxy URL (http://, socks5://, etc.).
+            fingerprint: Browser fingerprint profile (dict or JSON string).
             version: Browser version to use (defaults to SDK version).
             auto_install: Auto-download browser if not found (default True).
             extra_args: Additional CLI args to pass to the browser.
@@ -75,6 +77,10 @@ class BrowserProcess:
             args.append("--headless")
         if proxy:
             args.extend(["--proxy", proxy])
+        if fingerprint:
+            import json as _json
+            fp_str = fingerprint if isinstance(fingerprint, str) else _json.dumps(fingerprint)
+            args.extend(["--fingerprint", fp_str])
         if extra_args:
             args.extend(extra_args)
 

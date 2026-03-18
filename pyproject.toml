@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nyx-browser"
-version = "0.3.0b1"
+version = "0.3.0b2"
 description = "Stealth browser automation for Python. Real browser with anti-bot bypass built into the engine. Playwright-compatible API."
 readme = "README.md"
 license = "MIT"

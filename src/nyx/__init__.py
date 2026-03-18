@@ -12,7 +12,7 @@ from nyx.errors import (
     NyxInstallError, NyxLaunchError, NyxBrowserCrashed,
 )
 
-__version__ = "0.3.0b1"
+__version__ = "0.3.0b2"
 __all__ = [
     "Nyx", "Browser", "Snapshot", "Page", "Locator", "AgentBrowser", "Response",
     "NyxError", "NyxTimeout", "NyxConnectionError", "NyxNotFound",
