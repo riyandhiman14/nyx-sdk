@@ -35,6 +35,18 @@ class SyncLocator:
     def press(self, key: str) -> None:
         _run_sync(self._impl.press(key))
 
+    def select_option(self, value: str) -> None:
+        _run_sync(self._impl.select_option(value))
+
+    def check(self) -> None:
+        _run_sync(self._impl.check())
+
+    def uncheck(self) -> None:
+        _run_sync(self._impl.uncheck())
+
+    def hover(self) -> None:
+        _run_sync(self._impl.hover())
+
     def inner_text(self, *, timeout: float = 30) -> str:
         return _run_sync(self._impl.inner_text(timeout=timeout))
 
@@ -189,6 +201,9 @@ class SyncPage:
     def wait_for_timeout(self, timeout: float) -> None:
         _run_sync(self._impl.wait_for_timeout(timeout))
 
+    def wait_for_function(self, expression: str, *, timeout: float = 30) -> Any:
+        return _run_sync(self._impl.wait_for_function(expression, timeout=timeout))
+
     # ── Screenshot ──
 
     def screenshot(self, *, path: str | None = None, full_page: bool = False) -> bytes:
@@ -210,6 +225,9 @@ class SyncPage:
     def act(self, action: str, target: str | None = None, **kwargs):
         return _run_sync(self._impl.act(action, target, **kwargs))
 
+    def wait_for_challenge(self, *, timeout: float = 15) -> None:
+        _run_sync(self._impl.wait_for_challenge(timeout=timeout))
+
     def __repr__(self) -> str:
         return f"Sync{self._impl!r}"
 
@@ -229,11 +247,13 @@ class SyncBrowser:
         timeout: float = 30,
         version: str | None = None,
         auto_install: bool = True,
+        extra_args: list[str] | None = None,
     ) -> SyncBrowser:
         from nyx.browser import Browser
         browser = _run_sync(Browser.launch(
             headless=headless, proxy=proxy, timeout=timeout,
             version=version, auto_install=auto_install,
+            extra_args=extra_args,
         ))
         return cls(browser)
 
@@ -276,6 +296,132 @@ class SyncBrowser:
 
     def screenshot(self, path: str | None = None) -> bytes:
         return _run_sync(self._impl.screenshot(path=path))
+
+    def tabs(self) -> list:
+        return _run_sync(self._impl.tabs())
+
+    def new_tab(self, url: str | None = None) -> dict:
+        return _run_sync(self._impl.new_tab(url))
+
+    def switch_tab(self, tab_id: str) -> dict:
+        return _run_sync(self._impl.switch_tab(tab_id))
+
+    def close_tab(self, tab_id: str) -> dict:
+        return _run_sync(self._impl.close_tab(tab_id))
+
+    def __repr__(self) -> str:
+        return f"Sync{self._impl!r}"
+
+
+class SyncAgentBrowser:
+    """Sync wrapper for AgentBrowser."""
+
+    def __init__(self, _async_agent):
+        self._impl = _async_agent
+
+    @classmethod
+    def launch(
+        cls,
+        *,
+        headless: bool = True,
+        proxy: str | None = None,
+        timeout: float = 30,
+        version: str | None = None,
+        auto_install: bool = True,
+        extra_args: list[str] | None = None,
+    ) -> SyncAgentBrowser:
+        from nyx.agent import AgentBrowser
+        agent = _run_sync(AgentBrowser.launch(
+            headless=headless, proxy=proxy, timeout=timeout,
+            version=version, auto_install=auto_install,
+            extra_args=extra_args,
+        ))
+        return cls(agent)
+
+    @classmethod
+    def connect(cls, host: str = "http://localhost:8765", *,
+                timeout: float = 30) -> SyncAgentBrowser:
+        from nyx.agent import AgentBrowser
+        agent = _run_sync(AgentBrowser.connect(host, timeout=timeout))
+        return cls(agent)
+
+    def close(self) -> None:
+        _run_sync(self._impl.close())
+
+    def __enter__(self) -> SyncAgentBrowser:
+        return self
+
+    def __exit__(self, *args) -> None:
+        self.close()
+
+    def snapshot(self, *, full: bool = False):
+        return _run_sync(self._impl.snapshot(full=full))
+
+    def act(self, action: str, target: str | None = None, **kwargs):
+        return _run_sync(self._impl.act(action, target, **kwargs))
+
+    def act_sequence(self, steps: list[dict]):
+        return _run_sync(self._impl.act_sequence(steps))
+
+    def navigate(self, url: str, timeout: int = 15000) -> dict:
+        return _run_sync(self._impl.navigate(url, timeout))
+
+    def text(self) -> str:
+        return _run_sync(self._impl.text())
+
+    def page_html(self) -> str:
+        return _run_sync(self._impl.page_html())
+
+    def eval_js(self, script: str) -> Any:
+        return _run_sync(self._impl.eval_js(script))
+
+    def screenshot(self, path: str | None = None) -> bytes:
+        return _run_sync(self._impl.screenshot(path))
+
+    def status(self, *, wait: str | None = None, timeout: int | None = None) -> dict:
+        return _run_sync(self._impl.status(wait=wait, timeout=timeout))
+
+    def wait_for(self, selector: str, timeout: int = 5000) -> dict:
+        return _run_sync(self._impl.wait_for(selector, timeout))
+
+    def wait_challenge(self, timeout: int = 15000) -> dict:
+        return _run_sync(self._impl.wait_challenge(timeout))
+
+    def back(self) -> dict:
+        return _run_sync(self._impl.back())
+
+    def forward(self) -> dict:
+        return _run_sync(self._impl.forward())
+
+    def tabs(self) -> list:
+        return _run_sync(self._impl.tabs())
+
+    def new_tab(self, url: str | None = None) -> dict:
+        return _run_sync(self._impl.new_tab(url))
+
+    def switch_tab(self, tab_id: str) -> dict:
+        return _run_sync(self._impl.switch_tab(tab_id))
+
+    def close_tab(self, tab_id: str) -> dict:
+        return _run_sync(self._impl.close_tab(tab_id))
+
+    def media(self) -> dict:
+        return _run_sync(self._impl.media())
+
+    def reset(self, url: str | None = None) -> dict:
+        return _run_sync(self._impl.reset(url))
+
+    def session_create(self, **config) -> dict:
+        return _run_sync(self._impl.session_create(**config))
+
+    def session_status(self) -> dict:
+        return _run_sync(self._impl.session_status())
+
+    def session_destroy(self) -> dict:
+        return _run_sync(self._impl.session_destroy())
+
+    def session_health(self) -> dict:
+        return _run_sync(self._impl.session_health())
 
     def __repr__(self) -> str:
         return f"Sync{self._impl!r}"

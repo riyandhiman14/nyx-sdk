@@ -2,124 +2,40 @@
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any, Optional
-
-import aiohttp
+from typing import Any
 
 from nyx._launcher import BrowserProcess
-from nyx.errors import NyxConnectionError, NyxError, NyxNotFound, NyxTimeout
-
-
-class Snapshot:
-    """Page state from /snapshot or /act response."""
-
-    def __init__(self, data: dict[str, Any]):
-        self._raw = data
-        self.url: str = data.get("url", "")
-        self.title: str = data.get("title", "")
-        self.tree = data.get("tree", {})
-        self.scroll_y: float = data.get("scroll_y", 0)
-        self.has_more: bool = data.get("has_more", False)
-        self.viewport_height: int = data.get("viewport_height", 0)
-        self.page_text: str = data.get("page_text", "")
-        self.history: list = data.get("history", [])
-        self.act_error: Optional[str] = data.get("act_error")
-        self.did_you_mean: list = data.get("did_you_mean", [])
-        self.failed_step: Optional[dict] = data.get("failed_step")
-        self.elements: list[dict] = self._flatten(self.tree)
-
-    def _flatten(self, root) -> list[dict]:
-        nodes = [root] if isinstance(root, dict) else (root if isinstance(root, list) else [])
-        result = []
-        for node in nodes:
-            if not isinstance(node, dict):
-                continue
-            if node.get("action_id"):
-                el = dict(node)
-                if not el.get("text"):
-                    el["text"] = self._collect_text(node)
-                result.append(el)
-            for child in node.get("children", []):
-                if isinstance(child, dict):
-                    result.extend(self._flatten(child))
-        return result
-
-    def _collect_text(self, node: dict) -> str:
-        parts = []
-        if "text" in node:
-            parts.append(node["text"])
-        for child in node.get("children", []):
-            if isinstance(child, dict):
-                parts.append(self._collect_text(child))
-        return " ".join(p for p in parts if p).strip()
-
-    def find(self, text: str) -> Optional[dict]:
-        q = text.lower()
-        for el in self.elements:
-            if q in (el.get("text") or "").lower():
-                return el
-        return None
-
-    def find_all(self, text: str) -> list[dict]:
-        q = text.lower()
-        return [el for el in self.elements if q in (el.get("text") or "").lower()]
-
-    def by_tag(self, tag: str) -> list[dict]:
-        return [el for el in self.elements if el.get("tag") == tag]
-
-    def inputs(self) -> list[dict]:
-        return [el for el in self.elements if el.get("tag") in ("input", "textarea")]
-
-    def links(self) -> list[dict]:
-        return [el for el in self.elements if el.get("tag") == "a"]
-
-    def buttons(self) -> list[dict]:
-        return [el for el in self.elements if el.get("tag") == "button"]
-
-    def __repr__(self) -> str:
-        return f"Snapshot(url={self.url!r}, title={self.title!r}, elements={len(self.elements)})"
+from nyx._transport import Transport
+from nyx.errors import NyxNotFound
+from nyx.snapshot import Snapshot
 
 
 class Browser:
     """Control the Nyx Browser via the AgentServer API.
 
-    Usage::
+    Playwright-compatible usage::
 
-        import asyncio
-        from nyx import Browser
+        async with await Browser.launch() as browser:
+            page = await browser.new_page()
+            await page.goto("https://example.com")
+            print(await page.title())
 
-        async def main():
-            async with await Browser.launch() as b:
-                snap = await b.goto("https://example.com")
-                print(snap.page_text)
+    Legacy usage (still supported)::
 
-        asyncio.run(main())
-
-    Or connect to an already-running browser::
-
-        async with await Browser.connect("http://localhost:8765") as b:
-            snap = await b.snapshot()
+        async with await Browser.launch() as b:
+            snap = await b.goto("https://example.com")
+            print(snap.page_text)
     """
 
     def __init__(
         self,
-        host: str = "http://localhost:8765",
+        transport: Transport,
         *,
-        timeout: float = 15,
         _process: BrowserProcess | None = None,
     ):
-        self.host = host.rstrip("/")
-        self.timeout = timeout
+        self._transport = transport
         self._process = _process
-        self._session: aiohttp.ClientSession | None = None
-
-    def _get_session(self) -> aiohttp.ClientSession:
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=self.timeout)
-            )
-        return self._session
+        self._pages: list = []
 
     # ── Lifecycle ─────────────────────────────────────────
 
@@ -131,28 +47,30 @@ class Browser:
         proxy: str | None = None,
         timeout: float = 30,
         version: str | None = None,
+        auto_install: bool = True,
         extra_args: list[str] | None = None,
     ) -> Browser:
         """Launch a new browser instance.
 
         Args:
             headless: Run without GUI (default True).
-            proxy: Proxy URL (reserved for future use).
+            proxy: Proxy URL (e.g. http://user:pass@host:port or socks5://...).
             timeout: Max seconds to wait for browser readiness.
             version: Browser version to use (defaults to SDK version).
+            auto_install: Auto-download browser if not found (default True).
             extra_args: Additional CLI args.
         """
         process = await BrowserProcess.start(
             headless=headless,
+            proxy=proxy,
             version=version,
+            auto_install=auto_install,
             extra_args=extra_args,
         )
-        browser = cls(
-            host=f"http://127.0.0.1:{process.port}",
-            timeout=timeout,
-            _process=process,
+        transport = Transport(
+            f"http://127.0.0.1:{process.port}", timeout=timeout
         )
-        return browser
+        return cls(transport, _process=process)
 
     @classmethod
     async def connect(
@@ -162,31 +80,13 @@ class Browser:
         timeout: float = 30,
     ) -> Browser:
         """Connect to an already-running browser."""
-        browser = cls(host=host, timeout=timeout)
-        await browser._wait_ready(timeout)
-        return browser
-
-    async def _wait_ready(self, max_wait: float = 30) -> None:
-        url = f"{self.host}/status"
-        deadline = asyncio.get_event_loop().time() + max_wait
-        session = self._get_session()
-
-        while asyncio.get_event_loop().time() < deadline:
-            try:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=2)) as r:
-                    if r.status == 200:
-                        return
-            except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
-                pass
-            await asyncio.sleep(1)
-
-        raise NyxConnectionError(f"Nyx Browser not responding at {self.host}")
+        transport = Transport(host, timeout=timeout)
+        await transport.wait_ready(timeout)
+        return cls(transport)
 
     async def close(self) -> None:
         """Shut down the browser and clean up."""
-        if self._session and not self._session.closed:
-            await self._session.close()
-            self._session = None
+        await self._transport.close()
         if self._process:
             await self._process.terminate()
 
@@ -196,58 +96,76 @@ class Browser:
     async def __aexit__(self, *args) -> None:
         await self.close()
 
-    # ── HTTP helpers ──────────────────────────────────────
+    # ── Playwright-compatible: Page management ────────────
 
-    async def _get(self, path: str, **params) -> Any:
-        session = self._get_session()
-        try:
-            async with session.get(f"{self.host}{path}", params=params) as r:
-                r.raise_for_status()
-                ct = r.headers.get("content-type", "")
-                if "json" in ct:
-                    return await r.json()
-                return await r.read()
-        except aiohttp.ClientError as e:
-            raise NyxConnectionError(f"Request failed: {e}") from e
+    async def new_page(self):
+        """Create a new tab and return a Page object."""
+        from nyx.page import Page
 
-    async def _post(self, path: str, body: dict | None = None, timeout: float | None = None) -> Any:
-        session = self._get_session()
-        t = aiohttp.ClientTimeout(total=timeout or self.timeout)
-        try:
-            async with session.post(f"{self.host}{path}", json=body or {}, timeout=t) as r:
-                r.raise_for_status()
-                ct = r.headers.get("content-type", "")
-                if "json" in ct:
-                    return await r.json()
-                return await r.read()
-        except aiohttp.ClientError as e:
-            raise NyxConnectionError(f"Request failed: {e}") from e
+        result = await self.new_tab()
+        tab_id = ""
+        if isinstance(result, dict):
+            tab_id = result.get("id", result.get("tab_id", ""))
+
+        if not tab_id:
+            tabs_list = await self.tabs()
+            if tabs_list:
+                last = tabs_list[-1]
+                tab_id = last.get("id", last.get("tab_id", str(len(tabs_list) - 1)))
+
+        page = Page(self, tab_id)
+        self._pages.append(page)
+        return page
+
+    async def _get_pages(self):
+        """Return list of Page objects for all open tabs."""
+        from nyx.page import Page
+
+        tabs_list = await self.tabs()
+        pages = []
+        for t in tabs_list:
+            tid = t.get("id", t.get("tab_id", ""))
+            existing = next((p for p in self._pages if p._tab_id == tid), None)
+            if existing and not existing._closed:
+                pages.append(existing)
+            else:
+                pages.append(Page(self, tid))
+        return pages
+
+    @property
+    def pages(self):
+        """Synchronous accessor — returns cached pages."""
+        return list(self._pages)
 
     # ── v2 API ────────────────────────────────────────────
 
     async def snapshot(self, *, full: bool = False) -> Snapshot:
         params = {"full": "true"} if full else {}
-        return Snapshot(await self._get("/snapshot", **params))
+        return Snapshot(await self._transport.get("/snapshot", params=params))
 
     async def act(self, action: str, target: str | None = None, **kwargs) -> Snapshot:
         body: dict[str, Any] = {"action": action}
         if target is not None:
             body["target"] = target
         body.update(kwargs)
-        data = await self._post("/act", body, timeout=max(self.timeout, 15))
+        data = await self._transport.post("/act", body, timeout=max(self._transport.timeout, 15))
         snap = Snapshot(data)
         if snap.act_error:
             raise NyxNotFound(f"{snap.act_error} (did_you_mean: {snap.did_you_mean})")
         return snap
 
     async def act_sequence(self, steps: list[dict]) -> Snapshot:
-        data = await self._post("/act-sequence", {"sequence": steps}, timeout=max(self.timeout, 30))
+        data = await self._transport.post(
+            "/act-sequence", {"sequence": steps},
+            timeout=max(self._transport.timeout, 30),
+        )
         return Snapshot(data)
 
-    # ── High-level actions ────────────────────────────────
+    # ── High-level actions (legacy, still supported) ──────
 
     async def goto(self, url: str) -> Snapshot:
-        await self._post("/navigate", {"url": url}, timeout=max(self.timeout, 15))
+        await self._transport.post("/navigate", {"url": url},
+                                   timeout=max(self._transport.timeout, 15))
         return await self.snapshot()
 
     async def click(self, target: str) -> Snapshot:
@@ -274,54 +192,52 @@ class Browser:
     # ── Legacy API ────────────────────────────────────────
 
     async def status(self) -> dict:
-        return await self._get("/status")
+        return await self._transport.get("/status")
 
     async def text(self) -> str:
-        data = await self._post("/text")
+        data = await self._transport.get("/text")
         return data.get("text", "") if isinstance(data, dict) else ""
 
     async def screenshot(self, path: str | None = None) -> bytes:
-        session = self._get_session()
-        async with session.get(f"{self.host}/screenshot") as r:
-            data = await r.read()
+        data = await self._transport.get_bytes("/screenshot")
         if path:
             with open(path, "wb") as f:
                 f.write(data)
         return data
 
     async def tabs(self) -> list:
-        data = await self._get("/tabs")
+        data = await self._transport.get("/tabs")
         return data if isinstance(data, list) else data.get("tabs", [])
 
     async def new_tab(self, url: str | None = None) -> dict:
         body = {"url": url} if url else {}
-        return await self._post("/new-tab", body)
+        return await self._transport.post("/new-tab", body)
 
     async def switch_tab(self, tab_id: str) -> dict:
-        return await self._post("/switch-tab", {"id": tab_id})
+        return await self._transport.post("/switch-tab", {"id": tab_id})
 
     async def close_tab(self, tab_id: str) -> dict:
-        return await self._post("/close-tab", {"id": tab_id})
+        return await self._transport.post("/close-tab", {"id": tab_id})
 
     async def reset(self, url: str | None = None) -> dict:
         body = {"url": url} if url else {}
-        return await self._post("/reset", body)
+        return await self._transport.post("/reset", body)
 
     async def wait_for(self, selector: str, timeout: int = 5000) -> dict:
-        return await self._post(
+        return await self._transport.post(
             "/wait", {"selector": selector, "timeout": timeout},
-            timeout=max(self.timeout, timeout / 1000 + 2),
+            timeout=max(self._transport.timeout, timeout / 1000 + 2),
         )
 
     async def wait_challenge(self, timeout: int = 15000) -> dict:
-        return await self._post(
+        return await self._transport.post(
             "/wait-challenge", {"timeout": timeout},
-            timeout=max(self.timeout, timeout / 1000 + 2),
+            timeout=max(self._transport.timeout, timeout / 1000 + 2),
         )
 
     async def click_at(self, x: int, y: int) -> dict:
-        return await self._post("/click-at", {"x": x, "y": y})
+        return await self._transport.post("/click-at", {"x": x, "y": y})
 
     def __repr__(self) -> str:
         managed = " (managed)" if self._process else ""
-        return f"Browser(host={self.host!r}{managed})"
+        return f"Browser(host={self._transport.host!r}{managed})"

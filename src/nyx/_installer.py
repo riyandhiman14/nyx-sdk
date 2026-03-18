@@ -15,13 +15,30 @@ import tempfile
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-from nyx._paths import BROWSERS_DIR, get_browser_app, get_browser_executable, get_aegis_path, current_sdk_version
+from nyx._paths import (
+    BROWSERS_DIR, get_browser_app, get_browser_executable,
+    get_aegis_path, current_sdk_version,
+)
 from nyx.errors import NyxInstallError
 
 
-GITHUB_REPO = "NyxBrowser/aegis-browser"
-ASSET_NAME = "nyx-browser-macos-arm64.tar.gz"
+GITHUB_REPO = os.environ.get("NYX_RELEASES_REPO", "riyandhiman14/nyx-releases")
 SHASUMS_NAME = "SHASUMS256.txt"
+
+
+def _is_linux() -> bool:
+    return sys.platform == "linux"
+
+
+def _is_macos() -> bool:
+    return sys.platform == "darwin"
+
+
+def _get_asset_name() -> str:
+    """Return the platform-specific asset filename."""
+    if _is_linux():
+        return "nyx-browser-linux-x86_64.tar.gz"
+    return "nyx-browser-macos-arm64.tar.gz"
 
 
 def _download_url(version: str, filename: str) -> str:
@@ -110,22 +127,29 @@ def install_sync(version: str | None = None, force: bool = False) -> Path:
             sys.stderr.write(f"Use --force to reinstall.\n")
             return dest_dir
 
-    if platform.machine() != "arm64":
+    asset_name = _get_asset_name()
+
+    if _is_macos() and platform.machine() != "arm64":
         sys.stderr.write(
-            f"Warning: pre-built binaries are for macOS arm64, "
+            f"Warning: pre-built macOS binaries are for arm64, "
+            f"but this machine is {platform.machine()}.\n"
+        )
+    elif _is_linux() and platform.machine() not in ("x86_64", "amd64"):
+        sys.stderr.write(
+            f"Warning: pre-built Linux binaries are for x86_64, "
             f"but this machine is {platform.machine()}.\n"
         )
 
-    sys.stderr.write(f"Installing Nyx Browser {ver}...\n")
+    sys.stderr.write(f"Installing Nyx Browser {ver} ({asset_name})...\n")
 
     # Fetch checksums
     sys.stderr.write("  Fetching checksums...\n")
     shasums = _fetch_shasums(ver)
 
     # Download archive
-    archive_url = _download_url(ver, ASSET_NAME)
+    archive_url = _download_url(ver, asset_name)
     with tempfile.TemporaryDirectory() as tmp:
-        archive_path = Path(tmp) / ASSET_NAME
+        archive_path = Path(tmp) / asset_name
 
         try:
             _download_with_progress(archive_url, archive_path)
@@ -133,7 +157,7 @@ def install_sync(version: str | None = None, force: bool = False) -> Path:
             raise NyxInstallError(f"Download failed: {e}") from e
 
         # Verify checksum
-        expected_hash = shasums.get(ASSET_NAME)
+        expected_hash = shasums.get(asset_name)
         if expected_hash:
             sys.stderr.write("  Verifying checksum...\n")
             _verify_sha256(archive_path, expected_hash)
@@ -149,23 +173,28 @@ def install_sync(version: str | None = None, force: bool = False) -> Path:
         with tarfile.open(archive_path, "r:gz") as tar:
             tar.extractall(dest_dir)
 
-    # Remove macOS quarantine
-    app_path = get_browser_app(ver)
-    if app_path.exists():
-        subprocess.run(
-            ["xattr", "-rd", "com.apple.quarantine", str(app_path)],
-            capture_output=True,
-        )
+    # Platform-specific post-install
+    if _is_macos():
+        app_path = get_browser_app(ver)
+        if app_path.exists():
+            subprocess.run(
+                ["xattr", "-rd", "com.apple.quarantine", str(app_path)],
+                capture_output=True,
+            )
 
-    # Make aegis executable
+    # Make binaries executable
+    exe = get_browser_executable(ver)
+    if exe.exists():
+        exe.chmod(0o755)
+
     aegis = get_aegis_path(ver)
     if aegis.exists():
         aegis.chmod(0o755)
 
-    # Make browser executable
-    exe = get_browser_executable(ver)
-    if exe.exists():
-        exe.chmod(0o755)
+    if _is_linux():
+        helper = dest_dir / "nyx-browser-helper"
+        if helper.exists():
+            helper.chmod(0o755)
 
     # Write metadata
     metadata = {

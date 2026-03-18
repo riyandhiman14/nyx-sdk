@@ -5,6 +5,7 @@ from __future__ import annotations
 import json as _json
 import shutil
 import subprocess
+import sys
 
 from nyx.errors import NyxConnectionError, NyxError, NyxTimeout
 from nyx.response import Response
@@ -88,9 +89,22 @@ class Nyx:
         self._bf_headers: dict[str, str] = {}
 
         if not self._binary:
-            raise NyxError(
-                "aegis binary not found. Run 'nyx install' or pass binary='path/to/aegis'"
-            )
+            # Auto-install aegis if not found
+            sys.stderr.write("Aegis not found. Installing...\n")
+            try:
+                from nyx._installer import install_sync
+                install_sync()
+            except Exception as e:
+                raise NyxError(
+                    f"aegis binary not found and auto-install failed: {e}\n"
+                    "Run 'nyx install' manually or pass binary='path/to/aegis'"
+                )
+            self._binary = self._find_aegis()
+            if not self._binary:
+                raise NyxError(
+                    "aegis binary not found after install. "
+                    "Run 'nyx install' or pass binary='path/to/aegis'"
+                )
 
         # Generate BrowserForge fingerprint once per session
         if profile:
@@ -106,7 +120,7 @@ class Nyx:
                 path = get_aegis_path(versions[-1])
                 if path.exists():
                     return str(path)
-        except Exception:
+        except (ImportError, OSError):
             pass
         return shutil.which("aegis")
 

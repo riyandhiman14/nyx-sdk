@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import base64
-import re
+import json
 from typing import TYPE_CHECKING, Any, Pattern
 
 if TYPE_CHECKING:
     from nyx.browser import Browser
 
+from nyx._transport import Transport
 from nyx.errors import NyxNotFound, NyxTimeout
 
 
@@ -42,6 +42,7 @@ class Page:
 
     def __init__(self, browser: Browser, tab_id: str):
         self._browser = browser
+        self._transport: Transport = browser._transport
         self._tab_id = tab_id
         self._url: str = ""
         self._closed = False
@@ -51,7 +52,6 @@ class Page:
         if self._closed:
             raise NyxNotFound("Page has been closed")
         tabs = await self._browser.tabs()
-        active = None
         for t in tabs:
             tid = t.get("id", t.get("tab_id", ""))
             if tid == self._tab_id:
@@ -59,14 +59,6 @@ class Page:
                     await self._browser.switch_tab(self._tab_id)
                 return
         raise NyxNotFound(f"Tab {self._tab_id} no longer exists")
-
-    async def _post(self, path: str, body: dict | None = None, timeout: float | None = None) -> Any:
-        await self._ensure_active()
-        return await self._browser._post(path, body, timeout=timeout)
-
-    async def _get(self, path: str, **params) -> Any:
-        await self._ensure_active()
-        return await self._browser._get(path, **params)
 
     @staticmethod
     def _js_str(s: str) -> str:
@@ -77,26 +69,52 @@ class Page:
     # ── Navigation ──
 
     async def goto(self, url: str, *, wait_until: str = "load", timeout: float = 30) -> None:
-        await self._post("/navigate", {"url": url}, timeout=timeout)
+        await self._ensure_active()
+        await self._transport.post(
+            "/navigate", {"url": url, "timeout": int(timeout * 1000)},
+            timeout=timeout + 5,
+        )
         self._url = url
 
     async def go_back(self, *, timeout: float = 30) -> None:
-        await self._post("/back", timeout=timeout)
-        snap = await self._get("/snapshot")
-        self._url = snap.get("url", self._url) if isinstance(snap, dict) else self._url
+        await self._ensure_active()
+        await self._transport.post("/back", timeout=timeout)
+        try:
+            await self._transport.get(
+                "/status",
+                params={"wait": "navigation", "timeout": "3000"},
+                timeout=5,
+            )
+        except NyxTimeout:
+            pass
+        snap_data = await self._transport.get("/snapshot")
+        self._url = snap_data.get("url", self._url) if isinstance(snap_data, dict) else self._url
 
     async def go_forward(self, *, timeout: float = 30) -> None:
-        await self._post("/forward", timeout=timeout)
-        snap = await self._get("/snapshot")
-        self._url = snap.get("url", self._url) if isinstance(snap, dict) else self._url
+        await self._ensure_active()
+        await self._transport.post("/forward", timeout=timeout)
+        try:
+            await self._transport.get(
+                "/status",
+                params={"wait": "navigation", "timeout": "3000"},
+                timeout=5,
+            )
+        except NyxTimeout:
+            pass
+        snap_data = await self._transport.get("/snapshot")
+        self._url = snap_data.get("url", self._url) if isinstance(snap_data, dict) else self._url
 
     async def reload(self, *, timeout: float = 30) -> None:
         url = self._url or (await self._get_current_url())
         if url:
-            await self._post("/navigate", {"url": url}, timeout=timeout)
+            await self._ensure_active()
+            await self._transport.post(
+                "/navigate", {"url": url, "timeout": int(timeout * 1000)},
+                timeout=timeout + 5,
+            )
 
     async def _get_current_url(self) -> str:
-        snap = await self._get("/snapshot")
+        snap = await self._transport.get("/snapshot")
         if isinstance(snap, dict):
             self._url = snap.get("url", "")
         return self._url
@@ -108,14 +126,16 @@ class Page:
         return self._url
 
     async def title(self) -> str:
-        snap = await self._get("/snapshot")
+        await self._ensure_active()
+        snap = await self._transport.get("/snapshot")
         if isinstance(snap, dict):
             self._url = snap.get("url", self._url)
             return snap.get("title", "")
         return ""
 
     async def content(self) -> str:
-        result = await self._post("/page-html")
+        await self._ensure_active()
+        result = await self._transport.get("/page-html")
         if isinstance(result, dict):
             return result.get("html", "")
         if isinstance(result, bytes):
@@ -126,45 +146,33 @@ class Page:
 
     async def click(self, selector: str, *, timeout: float = 30) -> None:
         await self._ensure_active()
-        try:
-            await self._browser._post(
-                "/act",
-                {"action": "click", "target": selector},
-                timeout=timeout,
-            )
-        except Exception:
-            # Fallback: use JS click
-            await self.evaluate(
-                f"document.querySelector({self._js_str(selector)})?.click()"
-            )
+        data = await self._transport.post(
+            "/act",
+            {"action": "click", "target": f"css:{selector}"},
+            timeout=timeout,
+        )
+        self._check_act_error(data)
 
     async def fill(self, selector: str, value: str, *, timeout: float = 30) -> None:
         await self._ensure_active()
-        try:
-            await self._browser._post(
-                "/act",
-                {"action": "fill", "target": selector, "value": value},
-                timeout=timeout,
-            )
-        except Exception:
-            # Fallback: use JS
-            await self.evaluate(
-                f"(() => {{ const el = document.querySelector({self._js_str(selector)}); "
-                f"if (el) {{ el.value = {self._js_str(value)}; "
-                f"el.dispatchEvent(new Event('input', {{bubbles: true}})); }} }})()"
-            )
+        data = await self._transport.post(
+            "/act",
+            {"action": "fill", "target": f"css:{selector}", "value": value},
+            timeout=timeout,
+        )
+        self._check_act_error(data)
 
     async def type(self, selector: str, text: str, *, delay: float = 0) -> None:
         await self._ensure_active()
-        # Clear then type character by character via fill
         await self.evaluate(
             f"document.querySelector({self._js_str(selector)})?.focus()"
         )
-        await self._browser._post(
+        data = await self._transport.post(
             "/act",
-            {"action": "fill", "target": selector, "value": text},
+            {"action": "fill", "target": f"css:{selector}", "value": text},
             timeout=30,
         )
+        self._check_act_error(data)
 
     async def press(self, selector: str, key: str) -> None:
         await self._ensure_active()
@@ -175,10 +183,11 @@ class Page:
 
     async def select_option(self, selector: str, value: str) -> None:
         await self._ensure_active()
-        await self._browser._post(
+        data = await self._transport.post(
             "/act",
-            {"action": "select", "target": selector, "value": value},
+            {"action": "select", "target": f"css:{selector}", "value": value},
         )
+        self._check_act_error(data)
 
     async def check(self, selector: str) -> None:
         is_checked = await self.evaluate(
@@ -245,16 +254,14 @@ class Page:
         return result or ""
 
     async def text_content(self, selector: str) -> str | None:
-        result = await self.evaluate(
+        return await self.evaluate(
             f"document.querySelector({self._js_str(selector)})?.textContent"
         )
-        return result
 
     async def get_attribute(self, selector: str, name: str) -> str | None:
-        result = await self.evaluate(
+        return await self.evaluate(
             f"document.querySelector({self._js_str(selector)})?.getAttribute({self._js_str(name)})"
         )
-        return result
 
     async def is_visible(self, selector: str) -> bool:
         result = await self.evaluate(
@@ -272,11 +279,17 @@ class Page:
 
     async def evaluate(self, expression: str, arg: Any = None) -> Any:
         await self._ensure_active()
-        result = await self._browser._post(
-            "/eval-js", {"expression": expression}
+        result = await self._transport.post(
+            "/eval-js", {"script": f"return {expression}"}
         )
         if isinstance(result, dict):
-            return result.get("result")
+            val = result.get("result")
+            if isinstance(val, str):
+                try:
+                    return json.loads(val)
+                except (ValueError, TypeError):
+                    return val
+            return val
         return result
 
     async def evaluate_handle(self, expression: str) -> Any:
@@ -289,7 +302,7 @@ class Page:
     ) -> ElementHandle | None:
         await self._ensure_active()
         try:
-            await self._browser._post(
+            await self._transport.post(
                 "/wait",
                 {"selector": selector, "timeout": int(timeout * 1000)},
                 timeout=timeout + 2,
@@ -314,8 +327,15 @@ class Page:
         raise NyxTimeout(f"Timeout waiting for URL: {url}")
 
     async def wait_for_load_state(self, state: str = "load", *, timeout: float = 30) -> None:
-        # AgentServer doesn't expose readyState — poll snapshot until URL is stable
-        await asyncio.sleep(0.5)
+        await self._ensure_active()
+        try:
+            await self._transport.get(
+                "/status",
+                params={"wait": "navigation", "timeout": str(int(timeout * 1000))},
+                timeout=timeout + 2,
+            )
+        except NyxTimeout:
+            pass
 
     async def wait_for_timeout(self, timeout: float) -> None:
         await asyncio.sleep(timeout / 1000)
@@ -333,7 +353,7 @@ class Page:
 
     async def screenshot(self, *, path: str | None = None, full_page: bool = False) -> bytes:
         await self._ensure_active()
-        data = await self._browser.screenshot(path=None)
+        data = await self._transport.get_bytes("/screenshot")
         if path:
             with open(path, "wb") as f:
                 f.write(data)
@@ -365,6 +385,16 @@ class Page:
     async def wait_for_challenge(self, *, timeout: float = 15) -> None:
         await self._ensure_active()
         await self._browser.wait_challenge(timeout=int(timeout * 1000))
+
+    # ── Helpers ──
+
+    @staticmethod
+    def _check_act_error(data: Any) -> None:
+        """Raise NyxNotFound if the act response contains an error."""
+        if isinstance(data, dict) and data.get("act_error"):
+            msg = data["act_error"]
+            hints = data.get("did_you_mean", [])
+            raise NyxNotFound(f"{msg} (did_you_mean: {hints})")
 
     def __repr__(self) -> str:
         state = "closed" if self._closed else self._url or "blank"

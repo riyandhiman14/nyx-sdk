@@ -4,27 +4,38 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nyx-browser"
-version = "0.1.0"
-description = "Stealth HTTP client for Python — browser-grade TLS and headers, powered by Aegis."
+version = "0.3.0b1"
+description = "Stealth browser automation for Python. Real browser with anti-bot bypass built into the engine. Playwright-compatible API."
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
 requires-python = ">=3.9"
 authors = [{name = "Riyan Dhiman"}]
-keywords = ["browser", "automation", "scraping", "anti-bot", "stealth"]
+keywords = ["browser", "automation", "scraping", "anti-bot", "stealth", "playwright"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Topic :: Internet :: WWW/HTTP :: Browsers",
     "Topic :: Software Development :: Testing",
     "Programming Language :: Python :: 3",
 ]
-dependencies = ["aiohttp>=3.9.0", "browserforge>=0.1.0"]
+dependencies = ["aiohttp>=3.9.0"]
 
 [project.scripts]
 nyx = "nyx._cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff"]
+fingerprint = ["browserforge>=0.1.0"]
+dev = ["pytest", "pytest-asyncio", "ruff"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+nyx = ["py.typed"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "browser: tests that require a running browser instance",
+]

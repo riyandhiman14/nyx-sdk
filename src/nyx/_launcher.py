@@ -40,7 +40,9 @@ class BrowserProcess:
         *,
         headless: bool = True,
         port: int | None = None,
+        proxy: str | None = None,
         version: str | None = None,
+        auto_install: bool = True,
         extra_args: list[str] | None = None,
     ) -> BrowserProcess:
         """Start a new browser process.
@@ -48,18 +50,31 @@ class BrowserProcess:
         Args:
             headless: Run without GUI (default True).
             port: AgentServer port (auto-picked if None).
+            proxy: Proxy URL (http://, socks5://, etc.).
             version: Browser version to use (defaults to SDK version).
+            auto_install: Auto-download browser if not found (default True).
             extra_args: Additional CLI args to pass to the browser.
 
         Returns:
             A BrowserProcess instance connected to the running browser.
         """
-        executable = resolve_browser_executable(version)
+        try:
+            executable = resolve_browser_executable(version)
+        except FileNotFoundError:
+            if not auto_install:
+                raise
+            sys.stderr.write("Nyx Browser not found. Installing...\n")
+            from nyx._installer import install
+            await install(version=version)
+            executable = resolve_browser_executable(version)
+
         chosen_port = port or _find_free_port()
 
         args = [str(executable), "--agent-port", str(chosen_port)]
         if headless:
             args.append("--headless")
+        if proxy:
+            args.extend(["--proxy", proxy])
         if extra_args:
             args.extend(extra_args)
 
